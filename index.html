@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>gsimaps-vector-on-leaflet</title>
+  <meta name="viewport" content="initial-scale=1.0, maximum-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-hash@0.2.1/leaflet-hash.js"></script>
+  <script src="https://unpkg.com/leaflet.vectorgrid@1.3.0/dist/Leaflet.VectorGrid.bundled.min.js"></script>
+</head>
+
+<body>
+  <div id="map" style="position:absolute;top:0;left:0;bottom:0;right:0;"></div>
+  <script>
+    const map = L.map("map", L.extend({
+      zoom: 15,
+      center: [35.6707, 139.7852]
+    }, L.Hash.parseHash(location.hash)));
+
+    L.control.layers({
+      "陰影起伏図": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png", {
+        attribution: "<a href='http://maps.gsi.go.jp/development/ichiran.html'>地理院タイル</a>",
+        maxNativeZoom: 16
+      }).addTo(map),
+      "淡色地図": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
+        attribution: "<a href='http://maps.gsi.go.jp/development/ichiran.html'>地理院タイル</a>"
+      }),
+      "標準地図": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", {
+        attribution: "<a href='http://maps.gsi.go.jp/development/ichiran.html'>地理院タイル</a>"
+      }),
+      "色別標高図": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png", {
+        attribution: "<a href='http://maps.gsi.go.jp/development/ichiran.html'>地理院タイル</a>"
+      }),
+      "写真": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg", {
+        attribution: "<a href='http://maps.gsi.go.jp/development/ichiran.html'>地理院タイル</a>"
+      }),
+      "OpenStreetMap": L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; <a href='http://osm.org/copyright'>OpenStreetMap</a> contributors"
+      })
+    }).addTo(map);
+
+    map.zoomControl.setPosition("bottomright");
+
+    L.control.scale({
+      imperial: false,
+      metric: true
+    }).addTo(map);
+
+    L.hash(map);
+
+    const extent = 4096;
+    const tileSize = 512;
+    const zoomOffset = -1;
+    const unit = extent / tileSize;
+
+    const styles = {
+      "boundary": "#f00",
+      "building": "#f80",
+      "coastline": "#008",
+      "contour": "#888",
+      "elevation": "#000",
+      "label": "#000",
+      "lake": "#88f",
+      "landforma": "#800",
+      "landforml": "#400",
+      "landformp": "#200",
+      "railway": "#040",
+      "river": "#ff8",
+      "road": "#444",
+      "searoute": "#004",
+      "structurea": "#222",
+      "structurel": "#444",
+      "symbol": "#f0f",
+      "transp": "#880",
+      "waterarea": "#009",
+      "wstructurea": "#00c"
+    };
+
+    Object.assign(L.gridLayer({
+      maxZoom: 20,
+      maxNativeZoom: 17,
+      minZoom: 4,
+      attribution: "<a href='https://github.com/gsi-cyberjapan/gsimaps-vector-experiment'>地理院地図Vector</a>",
+      tileSize: tileSize,
+      pane: 'overlayPane'
+    }), {
+      createTile: function(coords, done) {
+
+        const size = this.getTileSize();
+        const canvas = L.DomUtil.create('canvas', 'leaflet-tile');
+        canvas.width = size.x;
+        canvas.height = size.y;
+
+        coords.z += zoomOffset;
+
+        const template = "https://cyberjapandata.gsi.go.jp/xyz/experimental_bvmap/{z}/{x}/{y}.pbf";
+        fetch(L.Util.template(template, coords)).then(a => a.ok ? a.arrayBuffer() : null).then(buffer => {
+          const features = [];
+          if (buffer !== null) {
+            const vt = new VectorTile(new Pbf(buffer));
+            Object.keys(vt.layers).forEach(name => {
+              const layer = vt.layers[name];
+              for (let i = 0; i < layer.length; i++) {
+                const feature = layer.feature(i);
+                feature.layer = name;
+                features.push(feature);
+              }
+            });
+          }
+          return features;
+
+        }).then(features => {
+
+          const shadow = document.createElement("canvas");
+          shadow.width = canvas.width;
+          shadow.height = canvas.height;
+
+          const context = shadow.getContext("2d");
+          context.setTransform(shadow.width / extent, 0, 0, shadow.height / extent, 0, 0);
+
+          features.filter(feature => feature.type === 3).forEach(feature => {
+            context.fillStyle = styles[feature.layer];
+            feature.loadGeometry().forEach(points => {
+              context.beginPath();
+              points.forEach((point, i) => {
+                if (i === 0) context.moveTo(point.x, point.y);
+                else context.lineTo(point.x, point.y);
+              });
+              context.fill();
+            });
+          });
+
+          features.filter(feature => feature.type === 2).forEach(feature => {
+            context.strokeStyle = styles[feature.layer];
+            context.lineWidth = unit * 2;
+            feature.loadGeometry().forEach(points => {
+              context.beginPath();
+              points.forEach((point, i) => {
+                if (i === 0) context.moveTo(point.x, point.y);
+                else context.lineTo(point.x, point.y);
+              });
+              context.stroke();
+            });
+          });
+
+          features.filter(feature => feature.type === 1).forEach(feature => {
+            context.fillStyle = styles[feature.layer];
+            feature.loadGeometry().forEach(points => {
+              points.forEach((point, i) => {
+                context.fillRect(point.x, point.y, unit * 8, unit * 8);
+              });
+            });
+          });
+
+          return shadow;
+
+        }).then(shadow => {
+
+          canvas.getContext("2d").drawImage(shadow, 0, 0);
+          done(null, canvas);
+
+        });
+
+        return canvas;
+      }
+    }).addTo(map);
+  </script>
+</body>
+
+</html>
